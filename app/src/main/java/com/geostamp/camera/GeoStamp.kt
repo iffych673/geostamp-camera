@@ -127,66 +127,147 @@ object GeoStamp {
         }
     }
 
-    // ---------- stamp drawing ----------
+    // ---------- stamp drawing (GPS Map Camera style) ----------
 
-    fun drawStamp(src: Bitmap, data: StampData, map: Bitmap?): Bitmap {
+    /** "Wednesday, 18/11/2026 08:52 AM GMT +05:00" from "yyyy-MM-dd HH:mm:ss". */
+    fun formatStampDate(timeText: String): String {
+        return try {
+            val inFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            val d = inFmt.parse(timeText) ?: Date()
+            val outFmt = SimpleDateFormat("EEEE, dd/MM/yyyy hh:mm a", Locale.US)
+            val off = java.util.TimeZone.getDefault().getOffset(d.time)
+            val sign = if (off >= 0) "+" else "-"
+            val abs = Math.abs(off)
+            val hh = abs / 3600000
+            val mm = (abs % 3600000) / 60000
+            outFmt.format(d) + " GMT " + sign + String.format(Locale.US, "%02d:%02d", hh, mm)
+        } catch (e: Exception) {
+            timeText
+        }
+    }
+
+    /** Pic-1 style stamp: map thumb bottom-left, dark rounded panels, header pill. */
+    fun drawStamp(ctx: Context, src: Bitmap, data: StampData, map: Bitmap?): Bitmap {
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(out)
-        val w = out.width
-        val h = out.height
-        val barH = (h * 0.30).toInt()
-        val barTop = h - barH
-        val barPaint = Paint().apply { color = Color.argb(175, 0, 0, 0) }
-        canvas.drawRect(0f, barTop.toFloat(), w.toFloat(), h.toFloat(), barPaint)
+        val w = out.width.toFloat()
+        val h = out.height.toFloat()
 
-        val pad = (w / 50).toFloat()
-        val textSize = w / 30f
-        val bold = Paint().apply {
+        // Geometry, scaled from the 1600x1200 GPS Map Camera reference.
+        val mapSize = (w * 0.19f).coerceAtMost(h * 0.25f)
+        val mapX = w * 0.113f
+        val mapY = h * 0.727f
+        val panelX0 = w * 0.315f
+        val panelX1 = w * 0.888f
+        val panelY0 = h * 0.726f
+        val panelY1 = h * 0.979f
+        val pillX0 = w * 0.708f
+        val pillX1 = panelX1
+        val pillY0 = h * 0.687f
+        val pillY1 = h * 0.727f
+        val textX = w * 0.334f
+        val corner = w * 0.01f
+        val panelPaint = Paint().apply { color = Color.argb(120, 0, 0, 0) }
+
+        // Dark translucent rounded panels.
+        canvas.drawRoundRect(panelX0, panelY0, panelX1, panelY1, corner, corner, panelPaint)
+        canvas.drawRoundRect(pillX0, pillY0, pillX1, pillY1, corner * 0.75f, corner * 0.75f, panelPaint)
+
+        // Header pill: camera icon + "GeoStamp Camera".
+        val pillTextSize = w * 0.0188f
+        val headPaint = Paint().apply {
             color = Color.WHITE
-            this.textSize = textSize
-            typeface = Typeface.DEFAULT_BOLD
-            setShadowLayer(3f, 1f, 1f, Color.BLACK)
+            textSize = pillTextSize
+            isAntiAlias = true
         }
-        val plain = Paint().apply {
-            color = Color.WHITE
-            this.textSize = textSize
-            setShadowLayer(3f, 1f, 1f, Color.BLACK)
+        val iconSize = pillTextSize * 1.2f
+        val iconLeft = pillX0 + (pillY1 - pillY0) * 0.25f
+        val iconTop = pillY0 + (pillY1 - pillY0 - iconSize) / 2f
+        try {
+            val icon = androidx.core.content.ContextCompat.getDrawable(ctx, android.R.drawable.ic_menu_camera)
+            icon?.let {
+                it.setBounds(
+                    iconLeft.toInt(), iconTop.toInt(),
+                    (iconLeft + iconSize).toInt(), (iconTop + iconSize).toInt()
+                )
+                it.setColorFilter(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN)
+                it.draw(canvas)
+            }
+        } catch (e: Exception) {
         }
-        val small = Paint().apply {
-            color = Color.LTGRAY
-            this.textSize = w / 55f
-        }
+        val headTextX = iconLeft + iconSize + pillTextSize * 0.4f
+        val headBaseline = pillY0 + (pillY1 - pillY0) * 0.5f + pillTextSize * 0.36f
+        canvas.drawText("GeoStamp Camera", headTextX, headBaseline, headPaint)
 
-        val lines = ArrayList<Pair<String, Paint>>()
-        var first = data.timeText + " · " + data.timeSource
-        if (data.isMock) first += " · MOCK LOCATION DETECTED"
-        lines.add(Pair(first, bold))
-        lines.add(Pair(data.poiName ?: data.address, plain))
-        var coord = "Lat %.5f, Lon %.5f".format(Locale.US, data.lat, data.lon)
-        if (data.heading != null) coord += " · Heading %d°".format(Locale.US, data.heading.toInt())
-        lines.add(Pair(coord, plain))
-        if (data.weather != null) lines.add(Pair(data.weather, plain))
-        if (!data.signature.isNullOrBlank()) lines.add(Pair(data.signature, plain))
-
-        var mapSize = 0
-        var mapBitmap: Bitmap? = null
+        // Map thumbnail, rounded corners + red center pin.
         if (map != null) {
-            mapSize = (barH * 0.92).toInt()
-            mapBitmap = Bitmap.createScaledBitmap(map, mapSize, mapSize, true)
+            val scaled = Bitmap.createScaledBitmap(map, mapSize.toInt(), mapSize.toInt(), true)
+            canvas.save()
+            val clip = android.graphics.Path().apply {
+                addRoundRect(
+                    mapX, mapY, mapX + mapSize, mapY + mapSize,
+                    corner, corner, android.graphics.Path.Direction.CW
+                )
+            }
+            canvas.clipPath(clip)
+            canvas.drawBitmap(scaled, mapX, mapY, null)
+            canvas.restore()
+            val cx = mapX + mapSize / 2f
+            val pinR = mapSize * 0.085f
+            val cy = mapY + mapSize / 2f - pinR * 0.4f
+            val pinPaint = Paint().apply { color = Color.rgb(229, 57, 53); isAntiAlias = true }
+            canvas.drawCircle(cx, cy, pinR, pinPaint)
+            canvas.drawCircle(cx, cy, pinR * 0.45f, Paint().apply { color = Color.WHITE; isAntiAlias = true })
+            val tri = android.graphics.Path().apply {
+                moveTo(cx - pinR * 0.7f, cy + pinR * 0.55f)
+                lineTo(cx + pinR * 0.7f, cy + pinR * 0.55f)
+                lineTo(cx, cy + pinR * 1.5f)
+                close()
+            }
+            canvas.drawPath(tri, pinPaint)
+            val attrPaint = Paint().apply {
+                color = Color.WHITE
+                textSize = w * 0.008f
+                isAntiAlias = true
+                setShadowLayer(2f, 1f, 1f, Color.BLACK)
+            }
+            canvas.drawText("© OpenStreetMap", mapX + 4f, mapY + mapSize - 4f, attrPaint)
+            if (scaled != map) scaled.recycle()
         }
-        val textRight = w - pad - if (mapSize > 0) (mapSize + pad) else 0f
-        var y = barTop + pad + textSize
-        val lineH = textSize * 1.35f
-        for ((text, paint) in lines) {
-            if (y > h - pad) break
-            drawTextEllipsize(canvas, text, paint, textRight - pad, pad, y)
-            y += lineH
+
+        // Text lines (Pic-1 order): title, address, coords, date, note, extras.
+        val titlePaint = Paint().apply {
+            color = Color.WHITE
+            textSize = w * 0.03f
+            isAntiAlias = true
         }
-        if (mapBitmap != null) {
-            val mx = w - pad - mapSize
-            val my = barTop + (barH - mapSize) / 2f
-            canvas.drawBitmap(mapBitmap, mx, my, null)
-            canvas.drawText("© OpenStreetMap contributors", mx, my + mapSize - 4f, small)
+        val bodyPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = w * 0.0213f
+            isAntiAlias = true
+        }
+        val lines = ArrayList<Triple<String, Paint, Float>>()
+        lines.add(Triple(data.poiName ?: data.address, titlePaint, 1.35f))
+        if (data.poiName != null) lines.add(Triple(data.address, bodyPaint, 1f))
+        var coord = "Lat %.6f° Long %.6f°".format(Locale.US, data.lat, data.lon)
+        if (data.heading != null) coord += " · Heading %d°".format(Locale.US, data.heading.toInt())
+        lines.add(Triple(coord, bodyPaint, 1f))
+        var dateLine = formatStampDate(data.timeText)
+        if (data.isMock) dateLine += " · MOCK LOCATION"
+        lines.add(Triple(dateLine, bodyPaint, 1f))
+        lines.add(Triple("Note: Captured by GeoStamp Camera", bodyPaint, 1f))
+        if (data.weather != null) lines.add(Triple(data.weather, bodyPaint, 1f))
+        if (!data.signature.isNullOrBlank()) lines.add(Triple(data.signature, bodyPaint, 1f))
+
+        val pad = h * 0.012f
+        var totalWeight = 0f
+        for ((_, _, wt) in lines) totalWeight += wt
+        val unit = (panelY1 - panelY0 - pad * 2f) / totalWeight
+        var y = panelY0 + pad + unit * 0.62f
+        val maxTextW = panelX1 - textX - pad
+        for ((text, paint, wt) in lines) {
+            drawTextEllipsize(canvas, text, paint, maxTextW, textX, y)
+            y += unit * wt
         }
         return out
     }

@@ -11,4 +11,14 @@
     <string name="sig_contact_hint">Phone / contact (optional)</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="open_camera">Open Camera</string>
+    <string name="pdf_report">PDF Report</string>
+    <string name="photos_today">Photos Today</string>
+    <string name="total_photos">Total Photos</string>
+    <string name="this_week">This Week</string>
+    <string name="saved_places">Saved Places</string>
+    <string name="recent_photos">Recent Photos</string>
+    <string name="no_photos_yet">No photos yet — tap Open Camera to take your first stamped photo.</string>
+    <string name="dashboard_footer">Ad-free · Photos saved in Pictures/GeoStamp</string>
 </resources>

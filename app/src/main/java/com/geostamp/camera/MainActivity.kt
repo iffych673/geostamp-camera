@@ -198,7 +198,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     /** Live stamp preview: the same lines the photo will be stamped with. */
     private fun refreshStampPreview() {
         val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-        val time = fmt.format(Date())
+        val dateLine = GeoStamp.formatStampDate(fmt.format(Date()))
         val loc = lastLocation
         val address = lastAddress ?: if (loc == null) "Waiting for GPS…" else "Locating address…"
         val coords = if (loc != null) {
@@ -206,7 +206,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } else {
             "Lat —, Lon —"
         }
-        stampPreview.text = "$time\n$address\n$coords"
+        stampPreview.text = "$address\n$coords\n$dateLine"
     }
 
     /** Throttled background reverse-geocode so the preview shows a real address. */
@@ -243,11 +243,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         popup.menu.add(0, 1, 0, getString(R.string.poi))
         popup.menu.add(0, 2, 0, getString(R.string.signature))
         popup.menu.add(0, 3, 0, getString(R.string.pdf))
+        popup.menu.add(0, 4, 0, getString(R.string.dashboard))
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> showPoiDialog()
                 2 -> showSignatureDialog()
                 3 -> createPdfReport()
+                4 -> finish()
             }
             true
         }
@@ -328,7 +330,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     timeText, timeSource, isMock, address, lat, lon,
                     lastAzimuth, weather, poi, signature
                 )
-                val stamped = GeoStamp.drawStamp(raw, data, map)
+                val stamped = GeoStamp.drawStamp(this, raw, data, map)
                 val base = GeoStamp.stampFileName()
                 val originalName = base.replace(".jpg", "_original.jpg")
                 GeoStamp.saveJpegToGallery(this, raw, originalName)
