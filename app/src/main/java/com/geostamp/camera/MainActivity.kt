@@ -324,7 +324,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val weather = if (loc != null) GeoStamp.fetchWeather(lat, lon) else null
                 val poi = if (loc != null) GeoStamp.findPoi(this, lat, lon) else null
                 val signature = GeoStamp.getSignature(this)
-                val mapSize = (raw.height * 0.30 * 0.92).toInt()
+                val mapSize = minOf((raw.width * 0.22).toInt(), 768)
                 val map = if (loc != null && mapSize > 0) GeoStamp.fetchMapBitmap(lat, lon, mapSize) else null
                 val data = GeoStamp.StampData(
                     timeText, timeSource, isMock, address, lat, lon,

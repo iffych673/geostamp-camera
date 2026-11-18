@@ -94,9 +94,11 @@ object GeoStamp {
         }
     }
 
-    /** 3x3 OSM tiles at zoom 16, center-cropped to [sizePx]. Null on any failure. */
+    /** 3x3 OSM tiles at zoom 16, center-cropped to [sizePx]. A failed tile is
+     *  filled with a neutral green instead of failing the whole map. */
     fun fetchMapBitmap(lat: Double, lon: Double, sizePx: Int): Bitmap? {
         return try {
+            val size = sizePx.coerceIn(64, 768)
             val zoom = 16
             val n = 1 shl zoom
             val xtile = floor((lon + 180.0) / 360.0 * n).toInt()
@@ -104,24 +106,37 @@ object GeoStamp {
             val ytile = floor((1.0 - ln(tan(latRad) + 1.0 / kotlin.math.cos(latRad)) / Math.PI) / 2.0 * n).toInt()
             val big = Bitmap.createBitmap(768, 768, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(big)
+            val fillPaint = Paint().apply { color = Color.rgb(183, 217, 168) }
             for (dx in -1..1) {
                 for (dy in -1..1) {
                     val tx = xtile + dx
                     val ty = ytile + dy
-                    val url = "https://tile.openstreetmap.org/$zoom/$tx/$ty.png"
-                    val conn = URL(url).openConnection() as HttpURLConnection
-                    conn.connectTimeout = 8000
-                    conn.readTimeout = 8000
-                    conn.setRequestProperty("User-Agent", "GeoStampCamera/1.0")
-                    if (conn.responseCode != 200) return null
-                    val tile = BitmapFactory.decodeStream(conn.inputStream) ?: return null
-                    canvas.drawBitmap(tile, ((dx + 1) * 256).toFloat(), ((dy + 1) * 256).toFloat(), null)
-                    tile.recycle()
+                    val left = ((dx + 1) * 256).toFloat()
+                    val top = ((dy + 1) * 256).toFloat()
+                    var tile: Bitmap? = null
+                    try {
+                        val url = "https://tile.openstreetmap.org/$zoom/$tx/$ty.png"
+                        val conn = URL(url).openConnection() as HttpURLConnection
+                        conn.connectTimeout = 5000
+                        conn.readTimeout = 5000
+                        conn.setRequestProperty("User-Agent", "GeoStampCamera/1.0")
+                        if (conn.responseCode == 200) {
+                            tile = BitmapFactory.decodeStream(conn.inputStream)
+                        }
+                    } catch (e: Exception) {
+                        tile = null
+                    }
+                    if (tile != null) {
+                        canvas.drawBitmap(tile, left, top, null)
+                        tile.recycle()
+                    } else {
+                        canvas.drawRect(left, top, left + 256f, top + 256f, fillPaint)
+                    }
                 }
             }
-            val left = (768 - sizePx) / 2
-            val top = (768 - sizePx) / 2
-            Bitmap.createBitmap(big, left, top, sizePx, sizePx)
+            val cropLeft = (768 - size) / 2
+            val cropTop = (768 - size) / 2
+            Bitmap.createBitmap(big, cropLeft, cropTop, size, size)
         } catch (e: Exception) {
             null
         }
@@ -146,7 +161,28 @@ object GeoStamp {
         }
     }
 
-    /** Pic-1 style stamp: map thumb bottom-left, dark rounded panels, header pill. */
+    /** Small map-pin icon (white pin + dark lens dot), like the app icon. */
+    private fun drawPinIcon(canvas: Canvas, cx: Float, cy: Float, size: Float, color: Int) {
+        val r = size * 0.32f
+        val centerY = cy - size * 0.14f
+        val pinPaint = Paint().apply { this.color = color; isAntiAlias = true }
+        canvas.drawCircle(cx, centerY, r, pinPaint)
+        val tri = android.graphics.Path().apply {
+            moveTo(cx - r * 0.85f, centerY + r * 0.3f)
+            lineTo(cx + r * 0.85f, centerY + r * 0.3f)
+            lineTo(cx, cy + size * 0.5f)
+            close()
+        }
+        canvas.drawPath(tri, pinPaint)
+        canvas.drawCircle(
+            cx, centerY, r * 0.45f,
+            Paint().apply { this.color = Color.rgb(11, 110, 79); isAntiAlias = true }
+        )
+    }
+
+    /** Pic-1 style stamp: map thumb bottom-left, dark rounded panels, header pill.
+     *  All geometry derives from the photo WIDTH, so a portrait photo gets the
+     *  exact same-looking stamp as a landscape one. */
     fun drawStamp(ctx: Context, src: Bitmap, data: StampData, map: Bitmap?): Bitmap {
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(out)
@@ -154,26 +190,28 @@ object GeoStamp {
         val h = out.height.toFloat()
 
         // Geometry, scaled from the 1600x1200 GPS Map Camera reference.
-        val mapSize = (w * 0.19f).coerceAtMost(h * 0.25f)
-        val mapX = w * 0.113f
-        val mapY = h * 0.727f
+        val panelH = w * 0.19f
+        val panelBottom = h - w * 0.02f
+        val panelTop = panelBottom - panelH
+        val pillH = w * 0.04f
+        val pillTop = panelTop - pillH
+        val pillBottom = panelTop
         val panelX0 = w * 0.315f
         val panelX1 = w * 0.888f
-        val panelY0 = h * 0.726f
-        val panelY1 = h * 0.979f
         val pillX0 = w * 0.708f
         val pillX1 = panelX1
-        val pillY0 = h * 0.687f
-        val pillY1 = h * 0.727f
+        val mapSize = panelH
+        val mapX = w * 0.113f
+        val mapY = panelTop
         val textX = w * 0.334f
         val corner = w * 0.01f
         val panelPaint = Paint().apply { color = Color.argb(120, 0, 0, 0) }
 
         // Dark translucent rounded panels.
-        canvas.drawRoundRect(panelX0, panelY0, panelX1, panelY1, corner, corner, panelPaint)
-        canvas.drawRoundRect(pillX0, pillY0, pillX1, pillY1, corner * 0.75f, corner * 0.75f, panelPaint)
+        canvas.drawRoundRect(panelX0, panelTop, panelX1, panelBottom, corner, corner, panelPaint)
+        canvas.drawRoundRect(pillX0, pillTop, pillX1, pillBottom, corner * 0.75f, corner * 0.75f, panelPaint)
 
-        // Header pill: camera icon + "GeoStamp Camera".
+        // Header pill: map-pin logo + "GeoStamp Camera".
         val pillTextSize = w * 0.0188f
         val headPaint = Paint().apply {
             color = Color.WHITE
@@ -181,58 +219,73 @@ object GeoStamp {
             isAntiAlias = true
         }
         val iconSize = pillTextSize * 1.2f
-        val iconLeft = pillX0 + (pillY1 - pillY0) * 0.25f
-        val iconTop = pillY0 + (pillY1 - pillY0 - iconSize) / 2f
-        try {
-            val icon = androidx.core.content.ContextCompat.getDrawable(ctx, android.R.drawable.ic_menu_camera)
-            icon?.let {
-                it.setBounds(
-                    iconLeft.toInt(), iconTop.toInt(),
-                    (iconLeft + iconSize).toInt(), (iconTop + iconSize).toInt()
-                )
-                it.setColorFilter(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN)
-                it.draw(canvas)
-            }
-        } catch (e: Exception) {
-        }
+        val iconLeft = pillX0 + (pillBottom - pillTop) * 0.25f
+        val iconTop = pillTop + (pillBottom - pillTop - iconSize) / 2f
+        drawPinIcon(
+            canvas,
+            iconLeft + iconSize / 2f, iconTop + iconSize / 2f,
+            iconSize, Color.WHITE
+        )
         val headTextX = iconLeft + iconSize + pillTextSize * 0.4f
-        val headBaseline = pillY0 + (pillY1 - pillY0) * 0.5f + pillTextSize * 0.36f
+        val headBaseline = pillTop + (pillBottom - pillTop) * 0.5f + pillTextSize * 0.36f
         canvas.drawText("GeoStamp Camera", headTextX, headBaseline, headPaint)
 
-        // Map thumbnail, rounded corners + red center pin.
+        // Map thumbnail with red pinpoint. If the map failed to load, draw a
+        // muted-green map panel with road lines so the stamp always shows a
+        // map area with a pin, even offline.
+        val mapLeft = mapX
+        val mapTop = mapY
+        val mapRight = mapX + mapSize
+        val mapBottom = mapY + mapSize
+        canvas.save()
+        val clip = android.graphics.Path().apply {
+            addRoundRect(
+                mapLeft, mapTop, mapRight, mapBottom,
+                corner, corner, android.graphics.Path.Direction.CW
+            )
+        }
+        canvas.clipPath(clip)
         if (map != null) {
             val scaled = Bitmap.createScaledBitmap(map, mapSize.toInt(), mapSize.toInt(), true)
-            canvas.save()
-            val clip = android.graphics.Path().apply {
-                addRoundRect(
-                    mapX, mapY, mapX + mapSize, mapY + mapSize,
-                    corner, corner, android.graphics.Path.Direction.CW
-                )
+            canvas.drawBitmap(scaled, mapLeft, mapTop, null)
+            if (scaled != map) scaled.recycle()
+        } else {
+            canvas.drawRect(
+                mapLeft, mapTop, mapRight, mapBottom,
+                Paint().apply { color = Color.rgb(123, 175, 110) }
+            )
+            val roadPaint = Paint().apply {
+                color = Color.rgb(216, 216, 216)
+                strokeWidth = mapSize * 0.02f
+                isAntiAlias = true
             }
-            canvas.clipPath(clip)
-            canvas.drawBitmap(scaled, mapX, mapY, null)
-            canvas.restore()
-            val cx = mapX + mapSize / 2f
-            val pinR = mapSize * 0.085f
-            val cy = mapY + mapSize / 2f - pinR * 0.4f
-            val pinPaint = Paint().apply { color = Color.rgb(229, 57, 53); isAntiAlias = true }
-            canvas.drawCircle(cx, cy, pinR, pinPaint)
-            canvas.drawCircle(cx, cy, pinR * 0.45f, Paint().apply { color = Color.WHITE; isAntiAlias = true })
-            val tri = android.graphics.Path().apply {
-                moveTo(cx - pinR * 0.7f, cy + pinR * 0.55f)
-                lineTo(cx + pinR * 0.7f, cy + pinR * 0.55f)
-                lineTo(cx, cy + pinR * 1.5f)
-                close()
-            }
-            canvas.drawPath(tri, pinPaint)
+            canvas.drawLine(mapLeft, mapTop + mapSize * 0.35f, mapRight, mapTop + mapSize * 0.55f, roadPaint)
+            canvas.drawLine(mapLeft + mapSize * 0.6f, mapTop, mapLeft + mapSize * 0.4f, mapBottom, roadPaint)
+        }
+        canvas.restore()
+
+        // Red pinpoint at the map centre (always drawn).
+        val cx = mapLeft + mapSize / 2f
+        val pinR = mapSize * 0.085f
+        val cy = mapTop + mapSize / 2f - pinR * 0.4f
+        val pinPaint = Paint().apply { color = Color.rgb(229, 57, 53); isAntiAlias = true }
+        canvas.drawCircle(cx, cy, pinR, pinPaint)
+        canvas.drawCircle(cx, cy, pinR * 0.45f, Paint().apply { color = Color.WHITE; isAntiAlias = true })
+        val tri = android.graphics.Path().apply {
+            moveTo(cx - pinR * 0.7f, cy + pinR * 0.55f)
+            lineTo(cx + pinR * 0.7f, cy + pinR * 0.55f)
+            lineTo(cx, cy + pinR * 1.5f)
+            close()
+        }
+        canvas.drawPath(tri, pinPaint)
+        if (map != null) {
             val attrPaint = Paint().apply {
                 color = Color.WHITE
                 textSize = w * 0.008f
                 isAntiAlias = true
                 setShadowLayer(2f, 1f, 1f, Color.BLACK)
             }
-            canvas.drawText("© OpenStreetMap", mapX + 4f, mapY + mapSize - 4f, attrPaint)
-            if (scaled != map) scaled.recycle()
+            canvas.drawText("© OpenStreetMap", mapLeft + 4f, mapBottom - 4f, attrPaint)
         }
 
         // Text lines (Pic-1 order): title, address, coords, date, note, extras.
@@ -259,11 +312,11 @@ object GeoStamp {
         if (data.weather != null) lines.add(Triple(data.weather, bodyPaint, 1f))
         if (!data.signature.isNullOrBlank()) lines.add(Triple(data.signature, bodyPaint, 1f))
 
-        val pad = h * 0.012f
+        val pad = w * 0.012f
         var totalWeight = 0f
         for ((_, _, wt) in lines) totalWeight += wt
-        val unit = (panelY1 - panelY0 - pad * 2f) / totalWeight
-        var y = panelY0 + pad + unit * 0.62f
+        val unit = (panelBottom - panelTop - pad * 2f) / totalWeight
+        var y = panelTop + pad + unit * 0.62f
         val maxTextW = panelX1 - textX - pad
         for ((text, paint, wt) in lines) {
             drawTextEllipsize(canvas, text, paint, maxTextW, textX, y)
