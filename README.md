@@ -5,6 +5,7 @@ category, own brand, own code, own design — no copied text, logos, or assets.
 
 ## Features (v1.1)
 - Dashboard home screen (opens first): Photos Today / Total / This Week / Saved Places, recent photo thumbnails, Open Camera + PDF Report
+- Launcher icon: white location pin + camera lens on a green gradient (adaptive icon + legacy PNGs; generator `tools/build_icon.py`)
 - CameraX capture with live preview — modern camera UI: full-screen preview, big round shutter, gallery + settings buttons
 - Live stamp preview on screen before capture (date/time, address, coordinates)
 - GPS stamp in GPS Map Camera style: map thumbnail bottom-left with red pin, dark rounded panels, "GeoStamp Camera" header pill, address, Lat/Long, "Wednesday, 18/11/2026 08:52 AM GMT +05:00" date line, "Note: Captured by GeoStamp Camera"
